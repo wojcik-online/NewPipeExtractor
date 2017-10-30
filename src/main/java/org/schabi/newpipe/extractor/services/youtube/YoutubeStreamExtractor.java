@@ -79,6 +79,7 @@ public class YoutubeStreamExtractor extends StreamExtractor {
     private Map<String, String> videoInfoPage;
 
     private boolean isAgeRestricted;
+    private boolean isLiveStream;
 
     public YoutubeStreamExtractor(StreamingService service, String url) throws IOException, ExtractionException {
         super(service, url);
@@ -423,8 +424,11 @@ public class YoutubeStreamExtractor extends StreamExtractor {
 
     @Override
     public StreamType getStreamType() throws ParsingException {
-        //todo: if implementing livestream support this value should be generated dynamically
-        return StreamType.VIDEO_STREAM;
+        if(isLiveStream) {
+            return StreamType.LIVE_STREAM;
+        } else {
+            return StreamType.VIDEO_STREAM;
+        }
     }
 
     @Override
@@ -506,9 +510,9 @@ public class YoutubeStreamExtractor extends StreamExtractor {
         doc = Jsoup.parse(pageContent, getCleanUrl());
 
         String playerUrl;
+        String infoPageResponse = dl.download(String.format(GET_VIDEO_INFO_URL, getId()));
         // Check if the video is age restricted
         if (pageContent.contains("<meta property=\"og:restrictions:age")) {
-            String infoPageResponse = dl.download(String.format(GET_VIDEO_INFO_URL, getId()));
             videoInfoPage = Parser.compatParseMap(infoPageResponse);
             playerUrl = getPlayerUrlFromRestrictedVideo();
             isAgeRestricted = true;
@@ -517,6 +521,13 @@ public class YoutubeStreamExtractor extends StreamExtractor {
             playerArgs = getPlayerArgs(ytPlayerConfig);
             playerUrl = getPlayerUrl(ytPlayerConfig);
             isAgeRestricted = false;
+
+            // check if we have a livestream
+            if ((playerArgs.has("ps") && playerArgs.get("ps").toString().equals("live"))
+                    || (playerArgs.get(URL_ENCODED_FMT_STREAM_MAP).toString().isEmpty())) {
+                isLiveStream = true;
+                videoInfoPage = Parser.compatParseMap(infoPageResponse);
+            }
         }
 
         if (decryptionCode.isEmpty()) {
@@ -547,20 +558,12 @@ public class YoutubeStreamExtractor extends StreamExtractor {
         JsonObject playerArgs;
 
         //attempt to load the youtube js player JSON arguments
-        boolean isLiveStream = false; //used to determine if this is a livestream or not
+        isLiveStream = false; //used to determine if this is a livestream or not
         try {
             playerArgs = playerConfig.getObject("args");
 
-            // check if we have a live stream. We need to filter it, since its not yet supported.
-            if ((playerArgs.has("ps") && playerArgs.get("ps").toString().equals("live"))
-                    || (playerArgs.get(URL_ENCODED_FMT_STREAM_MAP).toString().isEmpty())) {
-                isLiveStream = true;
-            }
         } catch (Exception e) {
             throw new ParsingException("Could not parse yt player config", e);
-        }
-        if (isLiveStream) {
-            throw new LiveStreamException("This is a Live stream. Can't use those right now.");
         }
 
         return playerArgs;
